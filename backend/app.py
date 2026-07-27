@@ -21,10 +21,12 @@ def convert():
         return jsonify({"error": "No file selected"}), 400
 
     suffix = os.path.splitext(file.filename or "")[1]
+    tmp_path = None
     try:
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-            file.save(tmp.name)
-            tmp_path = tmp.name
+        tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+        tmp.close()
+        file.save(tmp.name)
+        tmp_path = tmp.name
 
         result = converter.convert(tmp_path)
         return jsonify(
@@ -36,10 +38,31 @@ def convert():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
-        if os.path.exists(tmp_path):
+        if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
 
+@app.route("/convert-url", methods=["POST"])
+def convert_url():
+    data = request.get_json(silent=True)
+    if not data or "url" not in data:
+        return jsonify({"error": "No URL provided"}), 400
+
+    url = data["url"].strip()
+    if not url:
+        return jsonify({"error": "Empty URL"}), 400
+
+    try:
+        result = converter.convert(url)
+        return jsonify(
+            {
+                "markdown": result.text_content,
+                "filename": url.split("/")[-1] or url,
+            }
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
-    print("Backend running on http://localhost:8000")
     app.run(host="127.0.0.1", port=8000, debug=True)

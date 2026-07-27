@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, type DragEvent, type ChangeEvent } from "react"
+import { useState, useCallback, useRef, useEffect, type DragEvent, type ChangeEvent } from "react"
 import {
   ArrowUpFromLine,
   Copy,
@@ -7,25 +7,32 @@ import {
   AlertCircle,
   FileText,
   Check,
+  Link2,
+  Upload,
+  Clipboard,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 type Status = "idle" | "loading" | "success" | "error"
+type Mode = "file" | "url"
 
 const COPY_FEEDBACK_MS = 1800
 
 export default function App() {
+  const [mode, setMode] = useState<Mode>("file")
   const [status, setStatus] = useState<Status>("idle")
   const [markdown, setMarkdown] = useState("")
   const [filename, setFilename] = useState("")
   const [error, setError] = useState("")
   const [dragOver, setDragOver] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [url, setUrl] = useState("")
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const urlInputRef = useRef<HTMLInputElement>(null)
   const copyTimeout = useRef<ReturnType<typeof setTimeout>>()
 
-  const convert = useCallback(async (file: File) => {
+  const convertFile = useCallback(async (file: File) => {
     setStatus("loading")
     setError("")
     setMarkdown("")
@@ -39,6 +46,7 @@ export default function App() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? "Conversion failed")
       setMarkdown(data.markdown)
+      setFilename(data.filename ?? file.name)
       setStatus("success")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong")
@@ -46,14 +54,43 @@ export default function App() {
     }
   }, [])
 
+  const convertUrl = useCallback(async (targetUrl: string) => {
+    setStatus("loading")
+    setError("")
+    setMarkdown("")
+    setFilename(targetUrl)
+
+    try {
+      const res = await fetch("/api/convert-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: targetUrl }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? "Conversion failed")
+      setMarkdown(data.markdown)
+      setFilename(data.filename ?? targetUrl)
+      setStatus("success")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong")
+      setStatus("error")
+    }
+  }, [])
+
+  const handleUrlSubmit = () => {
+    const trimmed = url.trim()
+    if (!trimmed) return
+    convertUrl(trimmed)
+  }
+
   const onDrop = useCallback(
     (e: DragEvent) => {
       e.preventDefault()
       setDragOver(false)
       const file = e.dataTransfer.files[0]
-      if (file) convert(file)
+      if (file) convertFile(file)
     },
-    [convert]
+    [convertFile]
   )
 
   const onDragOver = (e: DragEvent) => {
@@ -68,10 +105,37 @@ export default function App() {
   const onFileChange = useCallback(
     (e: ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0]
-      if (file) convert(file)
+      if (file) convertFile(file)
     },
-    [convert]
+    [convertFile]
   )
+
+  // clipboard paste for images
+  useEffect(() => {
+    const handler = (e: ClipboardEvent) => {
+      const target = e.target
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return
+
+      const items = e.clipboardData?.items
+      if (!items) return
+
+      for (const item of items) {
+        if (item.type.startsWith("image/")) {
+          e.preventDefault()
+          const blob = item.getAsFile()
+          if (blob) {
+            const file = new File([blob], `screenshot-${Date.now()}.png`, { type: blob.type })
+            setMode("file")
+            convertFile(file)
+            return
+          }
+        }
+      }
+    }
+
+    document.addEventListener("paste", handler)
+    return () => document.removeEventListener("paste", handler)
+  }, [convertFile])
 
   const onCopy = async () => {
     try {
@@ -89,7 +153,12 @@ export default function App() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
-    a.download = filename.replace(/\.[^.]+$/, ".md") || "converted.md"
+    const name =
+      filename
+        .replace(/\.\w+$/, "")
+        .replace(/[^a-zA-Z0-9_-]/g, "_")
+        .slice(0, 64) || "converted"
+    a.download = `${name}.md`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -99,26 +168,57 @@ export default function App() {
     setMarkdown("")
     setFilename("")
     setError("")
+    setUrl("")
     if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
   return (
     <div className="relative mx-auto flex min-h-screen max-w-3xl flex-col items-center px-6 pb-20 pt-24">
       {/* ── Header ── */}
-      <header className="mb-14 text-center">
+      <header className="mb-10 text-center">
         <h1 className="font-display text-5xl font-medium leading-tight tracking-tight text-ink">
           Markdown
           <br />
           <span className="italic text-accent">Converter</span>
         </h1>
         <p className="mt-4 text-lg text-ink-muted">
-          Drop any file &mdash; PDF, DOCX, XLSX, HTML, audio &mdash; and get clean Markdown.
+          Anything to Markdown &mdash; files, URLs, images, YouTube.
         </p>
         <div className="mx-auto mt-8 h-px w-16 bg-gradient-to-r from-transparent via-accent/40 to-transparent" />
       </header>
 
-      {/* ── Drop Zone (idle / loading states) ── */}
+      {/* ── Mode Toggle ── */}
       {(status === "idle" || status === "loading") && (
+        <div className="mb-8 flex rounded-xl border border-border bg-paper-light p-1">
+          <button
+            onClick={() => { setMode("file"); setStatus("idle"); setError("") }}
+            className={cn(
+              "flex items-center gap-2 rounded-lg px-5 py-2 text-sm font-medium transition-all duration-200",
+              mode === "file"
+                ? "bg-accent text-paper shadow-sm"
+                : "text-ink-muted hover:text-ink"
+            )}
+          >
+            <Upload className="h-4 w-4" />
+            File
+          </button>
+          <button
+            onClick={() => { setMode("url"); setStatus("idle"); setError("") }}
+            className={cn(
+              "flex items-center gap-2 rounded-lg px-5 py-2 text-sm font-medium transition-all duration-200",
+              mode === "url"
+                ? "bg-accent text-paper shadow-sm"
+                : "text-ink-muted hover:text-ink"
+            )}
+          >
+            <Link2 className="h-4 w-4" />
+            URL
+          </button>
+        </div>
+      )}
+
+      {/* ── File Drop Zone ── */}
+      {(status === "idle" || status === "loading") && mode === "file" && (
         <div
           onDrop={onDrop}
           onDragOver={onDragOver}
@@ -162,6 +262,55 @@ export default function App() {
                   JSON &middot; XML &middot; Images &middot; Audio &middot; ZIP &amp; more
                 </p>
               </div>
+              <div className="mt-2 flex items-center gap-1.5 rounded-full border border-border/50 px-3 py-1.5">
+                <Clipboard className="h-3 w-3 text-ink-dim" />
+                <span className="font-mono text-[11px] text-ink-dim">
+                  Paste screenshot from clipboard
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── URL Input ── */}
+      {(status === "idle" || status === "loading") && mode === "url" && (
+        <div className="w-full animate-slide-up space-y-4">
+          {status === "loading" ? (
+            <div className="flex flex-col items-center gap-4 rounded-2xl border border-border bg-paper-light/50 p-14">
+              <Loader2 className="h-8 w-8 animate-spin text-accent" />
+              <div>
+                <p className="text-lg text-ink">Fetching URL&hellip;</p>
+                <p className="mt-1 font-mono text-sm text-ink-dim">{filename}</p>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-border bg-paper-light/50 p-8">
+              <div className="flex gap-3">
+                <div className="relative flex-1">
+                  <Link2 className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-dim" />
+                  <input
+                    ref={urlInputRef}
+                    type="url"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleUrlSubmit()}
+                    placeholder="Paste a YouTube link, article URL, or any webpage…"
+                    className="w-full rounded-xl border border-border bg-paper pl-10 pr-4 py-3 font-mono text-sm text-ink placeholder:text-ink-dim/50 outline-none transition-colors focus:border-accent/50 focus:ring-1 focus:ring-accent/30"
+                    autoFocus
+                  />
+                </div>
+                <Button
+                  onClick={handleUrlSubmit}
+                  disabled={!url.trim()}
+                  className="shrink-0"
+                >
+                  Convert
+                </Button>
+              </div>
+              <p className="mt-3 text-center font-mono text-[11px] text-ink-dim">
+                YouTube transcripts &middot; Web pages &middot; EPUB &middot; and more
+              </p>
             </div>
           )}
         </div>
@@ -178,7 +327,7 @@ export default function App() {
             </div>
           </div>
           <Button variant="outline" onClick={onReset} className="w-full">
-            Try another file
+            Try again
           </Button>
         </div>
       )}
@@ -188,11 +337,13 @@ export default function App() {
         <div className="w-full animate-slide-up space-y-4">
           {/* Toolbar */}
           <div className="flex items-center justify-between rounded-xl border border-border bg-paper-light px-5 py-3">
-            <div className="flex items-center gap-3">
-              <FileText className="h-4 w-4 text-accent" />
-              <span className="font-mono text-sm text-ink-muted">{filename}</span>
+            <div className="flex min-w-0 items-center gap-3">
+              <FileText className="h-4 w-4 shrink-0 text-accent" />
+              <span className="truncate font-mono text-sm text-ink-muted" title={filename}>
+                {filename}
+              </span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2">
               <Button size="sm" variant="outline" onClick={onCopy}>
                 {copied ? (
                   <>
@@ -220,7 +371,7 @@ export default function App() {
                 Markdown
               </span>
             </div>
-            <pre className="overflow-auto p-6 font-mono text-sm leading-relaxed text-ink/90 whitespace-pre-wrap break-words">
+            <pre className="max-h-[70vh] overflow-auto p-6 font-mono text-sm leading-relaxed text-ink/90 whitespace-pre-wrap break-words">
               <code>{markdown}</code>
             </pre>
           </div>
@@ -230,7 +381,7 @@ export default function App() {
               onClick={onReset}
               className="font-mono text-xs text-ink-dim transition-colors hover:text-ink-muted"
             >
-              Convert another file
+              Convert another
             </button>
           </div>
         </div>
