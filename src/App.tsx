@@ -235,6 +235,7 @@ export default function App() {
           <input
             ref={fileInputRef}
             type="file"
+            name="file"
             className="hidden"
             onChange={onFileChange}
           />
