@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect, type DragEvent, type ChangeEvent } from "react"
 import {
+  ArrowLeft,
   ArrowUpFromLine,
   Copy,
   Download,
@@ -175,15 +176,28 @@ export default function App() {
   return (
     <div className="relative mx-auto flex min-h-screen max-w-3xl flex-col items-center px-6 pb-20 pt-24">
       {/* ── Header ── */}
-      <header className="mb-10 text-center">
-        <h1 className="font-display text-5xl font-medium leading-tight tracking-tight text-ink">
-          Markdown
-          <br />
-          <span className="italic text-accent">Converter</span>
-        </h1>
-        <p className="mt-4 text-lg text-ink-muted">
-          Anything to Markdown &mdash; files, URLs, images, YouTube.
-        </p>
+      <header className="mb-10 w-full text-center">
+        <div className="relative flex items-center justify-center">
+          {status !== "idle" && (
+            <button
+              onClick={onReset}
+              className="absolute left-0 flex items-center gap-1.5 rounded-xl border border-border bg-paper-light px-3 py-2 font-mono text-xs text-ink-dim transition-colors hover:border-border-hover hover:text-ink"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              Back
+            </button>
+          )}
+          <div>
+            <h1 className="font-display text-5xl font-medium leading-tight tracking-tight text-ink">
+              Markdown
+              <br />
+              <span className="italic text-accent">Converter</span>
+            </h1>
+            <p className="mt-4 text-lg text-ink-muted">
+              Anything to Markdown &mdash; files, URLs, images, YouTube.
+            </p>
+          </div>
+        </div>
         <div className="mx-auto mt-8 h-px w-16 bg-gradient-to-r from-transparent via-accent/40 to-transparent" />
       </header>
 
